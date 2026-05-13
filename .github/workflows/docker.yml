@@ -29,6 +29,7 @@ jobs:
           context: .
           file: Dockerfile.base
           tags: outline-base:latest
+          load: true
           push: false
 
       - name: Log in to GitHub Container Registry
