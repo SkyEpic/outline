@@ -125,6 +125,16 @@ function DocumentScene({
       return;
     }
 
+    history.replace(document.url, {
+      ...location.state,
+      restore: undefined,
+      revisionId: undefined,
+    });
+
+    if (!revisionId) {
+      return;
+    }
+
     const response = await client.post("/revisions.info", {
       id: revisionId,
     });
@@ -135,7 +145,6 @@ function DocumentScene({
         new AllSelection(editor.view.state.doc)
       );
       toast.success(t("Document restored"));
-      history.replace(document.url, history.location.state);
     }
   }, [location, replaceSelection, t, history, document.url]);
 
@@ -146,11 +155,11 @@ function DocumentScene({
 
         if (event.shiftKey) {
           if (!readOnly) {
-            editorRef.current?.commands.redo();
+            editorRef.current?.commands.redo?.();
           }
         } else {
           if (!readOnly) {
-            editorRef.current?.commands.undo();
+            editorRef.current?.commands.undo?.();
           }
         }
       }
