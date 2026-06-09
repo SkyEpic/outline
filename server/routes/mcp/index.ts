@@ -4,6 +4,7 @@ import Router from "koa-router";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { ErrorCode } from "@modelcontextprotocol/sdk/types.js";
 import { TeamPreference } from "@shared/types";
 import { NotFoundError } from "@server/errors";
 import Logger from "@server/logging/Logger";
@@ -18,6 +19,7 @@ import { collectionTools } from "@server/tools/collections";
 import { commentTools } from "@server/tools/comments";
 import { documentTools } from "@server/tools/documents";
 import { fetchTool } from "@server/tools/fetch";
+import { templateTools } from "@server/tools/templates";
 import { userTools } from "@server/tools/users";
 import { version } from "../../../package.json";
 
@@ -28,7 +30,9 @@ const defaultInstructions = `Document markdown content must not begin with a top
 
 Document and collection markdown support @mentions using the syntax: @[Display Name](mention://user/userId). For example: @[John Doe](mention://user/c9a1b2e3-...). Use the "list_users" tool to find user IDs.
 
-Read images and attachments with the "fetch" tool by setting resource to "attachment" and passing either the attachment ID or an /api/attachments.redirect?id=... URL; the tool will return a signed URL for download.`;
+Read images and attachments with the "fetch" tool by setting resource to "attachment" and passing either the attachment ID or an /api/attachments.redirect?id=... URL; the tool will return a signed URL for download.
+
+When asked to create a document that follows a template, use the "list_templates" tool to find a matching template; each result already includes the template body as markdown. To use it unchanged, pass its ID as templateId to "create_document" and the new document is pre-filled from it. To adapt it first, modify the returned body and pass the result as the text parameter to "create_document". Either way no separate fetch is needed.`;
 
 /**
  * Creates a fresh MCP server instance with tools filtered by the OAuth
@@ -61,6 +65,7 @@ function createMcpServer(scopes: string[], guidance?: string): McpServer {
   commentTools(server, scopes);
   documentTools(server, scopes);
   fetchTool(server, scopes);
+  templateTools(server, scopes);
   userTools(server, scopes);
 
   return server;
@@ -113,7 +118,35 @@ router.post(
     };
 
     ctx.respond = false;
-    await transport.handleRequest(ctx.req, ctx.res, ctx.request.body);
+
+    // The SDK's handleRequest answers known protocol failures itself (4xx with a
+    // JSON-RPC body) via the transport. Anything that escapes here is unexpected.
+    try {
+      await transport.handleRequest(ctx.req, ctx.res, ctx.request.body);
+    } catch (error) {
+      Logger.error(
+        "MCP request handling failed",
+        error instanceof Error ? error : new Error(String(error)),
+        undefined,
+        ctx.req
+      );
+
+      if (!ctx.res.headersSent) {
+        ctx.res.writeHead(500, { "Content-Type": "application/json" });
+        ctx.res.end(
+          JSON.stringify({
+            jsonrpc: "2.0",
+            error: {
+              code: ErrorCode.InternalError,
+              message: "Internal server error",
+            },
+            id: null,
+          })
+        );
+      } else {
+        ctx.res.end();
+      }
+    }
   }
 );
 
