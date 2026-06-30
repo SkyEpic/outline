@@ -1,0 +1,49 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.SYNC_PAT }}
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/outline/outline.git
+
+      - name: Fetch upstream
+        run: git fetch upstream main
+
+      - name: Check for new commits
+        id: check
+        run: |
+          BEHIND=$(git rev-list --count custom-theme..upstream/main)
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          echo "Commits behind upstream: $BEHIND"
+
+      - name: Rebase onto upstream
+        if: steps.check.outputs.behind != '0'
+        run: git rebase upstream/main
+
+      - name: Push updated branch
+        if: steps.check.outputs.behind != '0'
+        run: git push --force-with-lease origin custom-theme
+
+      - name: Report conflict
+        if: failure()
+        run: |
+          echo "## :warning: Sync conflict detected" >> "$GITHUB_STEP_SUMMARY"
+          echo "Rebase of \`custom-theme\` onto \`upstream/main\` failed due to conflicts." >> "$GITHUB_STEP_SUMMARY"
+          echo "Manual intervention required. Run locally:" >> "$GITHUB_STEP_SUMMARY"
+          echo '```bash' >> "$GITHUB_STEP_SUMMARY"
+          echo "git fetch upstream && git rebase upstream/main" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
