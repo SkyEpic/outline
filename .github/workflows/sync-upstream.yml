@@ -1,0 +1,63 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Sync from upstream
+        run: |
+          set -e
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/outline/outline.git
+
+          # Retry transient network failures (GitHub 503s killed previous runs)
+          for i in 1 2 3; do
+            git fetch upstream main && break
+            echo "Fetch attempt $i failed, retrying in 30s..."
+            sleep 30
+            [ "$i" = "3" ] && exit 1
+          done
+
+          BEHIND=$(git rev-list --count HEAD..upstream/main)
+          echo "Commits behind upstream: $BEHIND"
+
+          if [ "$BEHIND" -gt 0 ]; then
+            OLD_HEAD=$(git rev-parse HEAD)
+
+            git reset --hard upstream/main
+
+            # Restore SkyEpic custom files from previous branch state.
+            # IMPORTANT: this list must include this workflow file itself,
+            # otherwise the schedule silently disappears after the next push.
+            git checkout $OLD_HEAD -- \
+              shared/styles/theme.ts \
+              build.js \
+              server/static/index.html \
+              .env.development \
+              Dockerfile \
+              .github/workflows/docker-skyepic.yml \
+              .github/workflows/sync-upstream.yml
+
+            # Remove upstream's auto-update workflow (causes unwanted PRs)
+            rm -f .github/workflows/update-node.yml
+
+            git add -A
+            git diff --cached --quiet || git commit -m "feat: SkyEpic customizations (theme, build, CI, sync)"
+            git push --force-with-lease origin custom-theme
+            echo "Synced $BEHIND commits from upstream."
+          else
+            echo "Already up to date."
+          fi
