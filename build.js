@@ -2,7 +2,14 @@
 /* oxlint-disable @typescript-oxlint/no-var-requires */
 /* oxlint-disable no-undef */
 const { exec } = require("child_process");
-const { readdirSync, existsSync } = require("fs");
+const {
+  readdirSync,
+  existsSync,
+  rmSync,
+  mkdirSync,
+  copyFileSync,
+} = require("fs");
+const path = require("path");
 
 const getDirectories = (source) =>
   readdirSync(source, { withFileTypes: true })
@@ -27,17 +34,13 @@ function execAsync(cmd) {
 }
 
 async function build() {
-  // Clean previous build
   console.log("Clean previous build…");
 
-  await Promise.all([
-    execAsync("rm -rf ./build/server"),
-    execAsync("rm -rf ./build/plugins"),
-  ]);
+  rmSync("./build/server", { recursive: true, force: true });
+  rmSync("./build/plugins", { recursive: true, force: true });
 
   const d = getDirectories("./plugins");
 
-  // Compile server and shared
   console.log("Compiling…");
   const swc = (src, out) =>
     execAsync(
@@ -49,9 +52,6 @@ async function build() {
     swc("./shared", "./build/shared"),
   ]);
 
-  // SWC's --strip-leading-paths removes only the topmost path segment, so a
-  // `plugins/<name>/server` input keeps `<name>/server/…` and lands correctly
-  // under a `./build/plugins` output directory.
   for (const plugin of d) {
     const hasServer = existsSync(`./plugins/${plugin}/server`);
 
@@ -66,25 +66,34 @@ async function build() {
     }
   }
 
-  // Copy static files
   console.log("Copying static files…");
-  await Promise.all([
-    execAsync(
-      "cp ./server/collaboration/Procfile ./build/server/collaboration/Procfile"
-    ),
-    execAsync(
-      "cp ./server/static/error.dev.html ./build/server/error.dev.html"
-    ),
-    execAsync(
-      "cp ./server/static/error.prod.html ./build/server/error.prod.html"
-    ),
-    execAsync("cp package.json ./build"),
-    ...d.map(async (plugin) =>
-      execAsync(
-        `mkdir -p ./build/plugins/${plugin} && cp ./plugins/${plugin}/plugin.json ./build/plugins/${plugin}/plugin.json 2>/dev/null || :`
-      )
-    ),
-  ]);
+  mkdirSync("./build/server/collaboration", { recursive: true });
+  mkdirSync("./build/plugins", { recursive: true });
+  copyFileSync(
+    "./server/collaboration/Procfile",
+    "./build/server/collaboration/Procfile"
+  );
+  copyFileSync(
+    "./server/static/error.dev.html",
+    "./build/server/error.dev.html"
+  );
+  copyFileSync(
+    "./server/static/error.prod.html",
+    "./build/server/error.prod.html"
+  );
+  copyFileSync("./package.json", "./build/package.json");
+
+  for (const plugin of d) {
+    const sourcePath = path.join("./plugins", plugin, "plugin.json");
+    const targetPath = path.join("./build/plugins", plugin, "plugin.json");
+
+    if (!existsSync(sourcePath)) {
+      continue;
+    }
+
+    mkdirSync(path.dirname(targetPath), { recursive: true });
+    copyFileSync(sourcePath, targetPath);
+  }
 
   console.log("Done!");
 }
