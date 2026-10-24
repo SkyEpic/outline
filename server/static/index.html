@@ -2,43 +2,7 @@
 <html lang="{lang}">
   <head>
     <title>{title}</title>
-    <meta
-      name="theme-color"
-      content="#FFF"
-      media="(prefers-color-scheme: light)"
-    />
-    <meta
-      name="theme-color"
-      content="#111319"
-      media="(prefers-color-scheme: dark)"
-    />
-    <script nonce="{csp-nonce}">
-      (function () {
-        var theme = "system";
-        var storedTheme;
-
-        try {
-          storedTheme = window.localStorage.getItem("theme");
-          theme = storedTheme ? JSON.parse(storedTheme) : theme;
-        } catch (_err) {
-          // Older versions stored the value without JSON encoding.
-          theme = storedTheme || theme;
-        }
-
-        var isDark =
-          theme === "dark" ||
-          (theme !== "light" &&
-            window.matchMedia &&
-            window.matchMedia("(prefers-color-scheme: dark)").matches);
-        var color = isDark ? "#111319" : "#FFF";
-
-        document
-          .querySelectorAll('meta[name="theme-color"]')
-          .forEach(function (element) {
-            element.setAttribute("content", color);
-          });
-      })();
-    </script>
+    <meta name="theme-color" content="#FFF" />
     <meta name="slack-app-id" content="{slack-app-id}" />
     <meta
       name="viewport"
@@ -111,9 +75,21 @@
     <div id="root"></div>
     {env}
     <script nonce="{csp-nonce}">
-      document.querySelector("#root").style.background = document
-        .querySelector('meta[name="theme-color"]')
-        .getAttribute("content");
+      if (window.localStorage) {
+        var theme = window.localStorage.getItem("theme");
+        var isDark =
+          theme === "dark" ||
+          (theme !== "light" &&
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches);
+        if (isDark) {
+          var color = "#111111";
+          document.querySelector("#root").style.background = color;
+          document
+            .querySelector('meta[name="theme-color"]')
+            .setAttribute("content", color);
+        }
+      }
     </script>
     {script-tags}
     <div class="screenreader-only">{content}</div>
