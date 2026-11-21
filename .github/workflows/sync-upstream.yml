@@ -1,0 +1,91 @@
+name: Sync upstream
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    outputs:
+      synced: ${{ steps.sync.outputs.synced }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: custom-theme
+          fetch-depth: 0
+
+      - name: Sync from upstream
+        id: sync
+        run: |
+          set -eu
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/outline/outline.git
+
+          # Retry transient network failures (GitHub 503s killed previous runs)
+          for i in 1 2 3; do
+            if git fetch --no-tags upstream main; then
+              break
+            fi
+            if [ "$i" = "3" ]; then
+              echo "::error::Could not fetch upstream after 3 attempts"
+              exit 1
+            fi
+            echo "Fetch attempt $i failed, retrying in 30s..."
+            sleep 30
+          done
+
+          BEHIND=$(git rev-list --count HEAD..upstream/main)
+          echo "Commits behind upstream: $BEHIND"
+
+          if [ "$BEHIND" -eq 0 ]; then
+            echo "Already up to date."
+            exit 0
+          fi
+
+          OLD_HEAD=$(git rev-parse HEAD)
+
+          git reset --hard upstream/main
+
+          # Restore SkyEpic custom files from previous branch state.
+          git checkout "$OLD_HEAD" -- \
+            shared/styles/theme.ts \
+            build.js \
+            server/static/index.html \
+            .env.development \
+            Dockerfile
+
+          # Keep the fork's workflow directory unchanged, GITHUB_TOKEN cannot push workflow edits.
+          rm -rf .github/workflows
+          git checkout "$OLD_HEAD" -- .github/workflows
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Nothing to commit."
+            exit 0
+          fi
+
+          git commit -m "feat: SkyEpic customizations (theme, build, CI, sync)"
+          git push --force-with-lease origin custom-theme
+          echo "synced=true" >> "$GITHUB_OUTPUT"
+          echo "Synced $BEHIND commits from upstream."
+
+  publish:
+    needs: sync
+    if: needs.sync.outputs.synced == 'true'
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/docker-skyepic.yml
+    with:
+      ref: custom-theme
