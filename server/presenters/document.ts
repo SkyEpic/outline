@@ -1,3 +1,5 @@
+import { setImmediate } from "node:timers/promises";
+import { chunk } from "es-toolkit/compat";
 import { Op } from "sequelize";
 import { Hour } from "@shared/utils/time";
 import { traceFunction } from "@server/logging/tracing";
@@ -7,6 +9,9 @@ import User from "@server/models/User";
 import { DocumentHelper } from "@server/models/helpers/DocumentHelper";
 import type { Context } from "@server/types";
 import presentUser from "./user";
+
+/** Number of documents presented concurrently before yielding to the event loop. */
+const PRESENT_BATCH_SIZE = 10;
 
 type Options = {
   /** Whether to render the document's public fields. */
@@ -215,7 +220,15 @@ export async function presentDocuments(
     }
   }
 
-  return Promise.all(
-    documents.map((document) => presentDocument(ctx, document, opts))
-  );
+  // Yield between batches so that serializing a large page does not block the event loop.
+  const results = [];
+  for (const batch of chunk(documents, PRESENT_BATCH_SIZE)) {
+    results.push(
+      ...(await Promise.all(
+        batch.map((document) => presentDocument(ctx, document, opts))
+      ))
+    );
+    await setImmediate();
+  }
+  return results;
 }
